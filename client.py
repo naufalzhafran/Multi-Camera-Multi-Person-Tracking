@@ -113,8 +113,10 @@ if __name__ == "__main__":
                                   frame.shape).round()
 
         for *xyxy, conf, cls in reversed(det):
-          x1 = int(xyxy[0]), x2 = int(xyxy[2])
-          y1 = int(xyxy[1]), y2 = int(xyxy[3])
+          x1 = int(xyxy[0])
+          x2 = int(xyxy[2])
+          y1 = int(xyxy[1])
+          y2 = int(xyxy[3])
 
           im_input = frame[y1:y2, x1:x2]
           cvt_img = im_input[:, :, ::-1]  # to RGB

@@ -7,5 +7,17 @@ yolo = {
 
 matching = {
     "match_distance_threshold" : 0.6,
-    "max_stored_feature" : 10,
+    "max_stored_features" : 10,
+    "max_idle_age" : 10,
 }
+
+camera = [
+    {
+        "id": 0,
+        "port": "5555"
+    },
+    {
+        "id": 1,
+        "port": "5565"
+    }
+]

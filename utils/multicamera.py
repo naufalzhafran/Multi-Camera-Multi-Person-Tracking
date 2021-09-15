@@ -1,7 +1,8 @@
+from typing import Tuple
 import torch
 import numpy as np
-from utils.general import linear_assignment
-
+from utils.general import linear_assignment, iou, xxyy_to_xysr, xysr_to_xxyy
+from utils.kalmanfilter import KalmanFilter
 
 class ClientPayload:
   """Payload class for cameras and server interaction
@@ -44,11 +45,37 @@ class Track:
     self.cameraid = cameraid
     self.personid = personid
     self.xyxy = xyxy
+
+    self.kf = KalmanFilter(dim_x=7, dim_z=4)
+    # Transition matrix
+    self.kf.F = np.array([[1, 0, 0, 0, 1, 0, 0],
+                          [0, 1, 0, 0, 0, 1, 0],
+                          [0, 0, 1, 0, 0, 0, 1],
+                          [0, 0, 0, 1, 0, 0, 0],
+                          [0, 0, 0, 0, 1, 0, 0],
+                          [0, 0, 0, 0, 0, 1, 0],
+                          [0, 0, 0, 0, 0, 0, 1]])
+
+    # Transformation matrix (Observation to State)
+    self.kf.H = np.array([[1, 0, 0, 0, 0, 0, 0],
+                          [0, 1, 0, 0, 0, 0, 0],
+                          [0, 0, 1, 0, 0, 0, 0],
+                          [0, 0, 0, 1, 0, 0, 0]])
+
+    self.kf.R[2:, 2:] *= 10.  # observation error covariance
+    self.kf.P[4:, 4:] *= 1000.  # initial velocity error covariance
+    self.kf.P *= 10.  # initial location error covariance
+    self.kf.Q[-1, -1] *= 0.01  # process noise
+    self.kf.Q[4:, 4:] *= 0.01  # process noise
+    self.kf.x[:4] = xxyy_to_xysr(xyxy)
+
     self.idle_age = 0
 
   def update(self, xyxy: list) -> None:
     if len(xyxy):
-      self.xyxy = xyxy
+      
+      self.kf.update(xxyy_to_xysr(xyxy))
+      self.xyxy = list(xysr_to_xxyy(self.kf.x))
       self.idle_age = 0
     else:
       self.idle_age += 1
@@ -58,6 +85,13 @@ class Track:
     if self.idle_age > max_idle_age:
       return True
     return False
+
+  def get_iou(self, xyxy: list) -> Tuple:
+    if self.kf.x[6] + self.kf.x[2] <= 0:
+      self.kf.x[6] *= 0.0
+    self.kf.predict()
+
+    return iou(xyxy, list(xysr_to_xxyy(self.kf.x))), self.personid
 
 class TrackDatabase:
   """Class of multiple tracks database
@@ -88,6 +122,16 @@ class TrackDatabase:
   def _remove_expired_track(self, cameraid:int, expired_tracks:list) -> None:
     for id in expired_tracks:
       self._db[cameraid].pop(id, None)
+
+  def get_iou_matrix(self, cameraid: int, list_xyxy: list, num_person: int) -> np.array:
+    result = np.zeros((len(list_xyxy), num_person))
+
+    for i in range(len(list_xyxy)):
+      for key, value in self._db[cameraid].items():
+        res_iou, personid = value.get_iou(list_xyxy[i])
+        result[i, personid] = res_iou
+
+    return result
 
   def update_track(self, cameraid: int, personid: int, xyxy: list) -> None:
     if personid in self._db[cameraid]:
@@ -141,10 +185,17 @@ class PersonDatabase:
   This class provide multi person's features management
   """
 
-  def __init__(self, max_feat, distance_threshold) -> None:
+  def __init__(self, max_feat: int, distance_threshold: float, 
+                iou_weight: float, reid_weigth: float, reid_threshold: float) -> None:
     self._db = []
     self._max_feat = max_feat
     self._distance_threshold = distance_threshold
+    self._reid_threshold = reid_threshold
+    self._iou_weight = iou_weight
+    self._reid_weight = reid_weigth
+
+  def get_num_person(self) -> int:
+    return len(self._db)
 
   def get_track(self, cameraid:int) -> None:
     return self._db[cameraid]
@@ -166,12 +217,15 @@ class PersonDatabase:
       result.append(temp)
     return np.array(result)
 
-  def feature_matching(self, list_feat: list) -> list:
+  def feature_matching(self, list_feat: list, iou_mat: np.array) -> list:
     result = []
     if len(list_feat) and len(self._db):
       dis_mat = self._generate_distance_mat(list_feat)
-      dis_mat[dis_mat < self._distance_threshold] = 0
-      matched_detection = linear_assignment(-dis_mat)
+      dis_mat[dis_mat < self._reid_threshold] = 0
+
+      tot_mat = self._reid_weight * dis_mat + self._iou_weight * iou_mat
+      tot_mat[tot_mat < self._distance_threshold] = 0
+      matched_detection = linear_assignment(-tot_mat)
 
       unmatched_detection = []
       for feat_id in range(len(list_feat)):
@@ -179,7 +233,7 @@ class PersonDatabase:
           unmatched_detection.append(feat_id)
 
       for m in matched_detection:
-        if (dis_mat[m[0], m[1]] < self._distance_threshold):
+        if (tot_mat[m[0], m[1]] < self._distance_threshold):
           unmatched_detection.append(m[0])
         else:
           self.add_feat(list_feat[m[0]], m[1])

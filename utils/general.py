@@ -865,3 +865,57 @@ def linear_assignment(cost_matrix):
     from scipy.optimize import linear_sum_assignment
     x, y = linear_sum_assignment(cost_matrix)
     return np.array(list(zip(x, y)))
+
+def iou(boxA, boxB):
+  """
+  Return the intersection over union value between two bounding boxes
+  The bounding boxes should be in format [xmin, ymin, xmax, ymax]
+  :param boxA: (np.ndarray) bounding box
+  :param boxB: (np.ndarray) bounding box
+  :return: Intersection over Union score for the two bounding boxes inputs
+  """
+  # determine the (x, y)-coordinates of the intersection rectangle
+  xA = max(boxA[0], boxB[0])
+  yA = max(boxA[1], boxB[1])
+  xB = min(boxA[2], boxB[2])
+  yB = min(boxA[3], boxB[3])
+
+  # compute the area of intersection rectangle
+  interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+
+  # compute the area of both the prediction and ground-truth rectangles
+  boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
+  boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
+
+  iou = interArea / float(boxAArea + boxBArea - interArea)
+  return iou
+
+def xysr_to_xxyy(b, score=None):
+  """
+    Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
+  [x1,y1,x2,y2] where x1,y1 is the top left and x2,y2 is the bottom right
+  :param b: (np.ndarray) bounding box in [x,y,s,r] format
+  :param score: (float) Mostly irrelevant, incase bounding box comes with score attached to position
+  :return: (np.ndarray) same bounding box in [x1,y1,x2,y2] format
+  """
+  w = np.sqrt(b[2]*b[3])
+  h = b[2]/w
+  if score is None:
+    return np.array([b[0]-w/2., b[1]-h/2., b[0]+w/2., b[1]+h/2.]).reshape(4, 1)
+  else:
+    return np.array([b[0]-w/2., b[1]-h/2., b[0]+w/2., b[1]+h/2., score])
+
+
+def xxyy_to_xysr(bbox):
+  """
+    Takes a bounding box in the form [x1,y1,x2,y2] and returns it in the form [x,y,s,r]
+  :param bbox: (np.ndarray) bounding box in [x,y,s,r] format
+  :return: (np.ndarray) same bounding box in [x,y,s,r] format
+  """
+  w = bbox[2]-bbox[0]
+  h = bbox[3]-bbox[1]
+  x = bbox[0]+w/2.
+  y = bbox[1]+h/2.
+  s = w*h
+  r = w/float(h)
+  return np.array([x, y, s, r]).reshape((4, 1))

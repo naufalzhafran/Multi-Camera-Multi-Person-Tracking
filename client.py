@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 
 from models.experimental import attempt_load
 from utils.general import check_img_size, non_max_suppression, \
-    scale_coords,  set_logging, min_max_normalize, letterbox
+    scale_coords,  set_logging, letterbox
 from utils.torch_utils import select_device
 from utils.multicamera import ClientPayload
 
@@ -50,7 +50,8 @@ if __name__ == "__main__":
   # Instantiate ReID Network
   extractor = FeatureExtractor(model_name='osnet_ain_x1_0',
                                model_path='weight/reid.pth.tar',
-                               device='cuda')
+                              # model_path='osnet_ain.pth.tar',
+                              device='cuda')
 
   # Create a VideoCapture object and read from input file
   # If the input is the camera, pass 0 instead of the video file name
@@ -63,17 +64,17 @@ if __name__ == "__main__":
   # load coco labels
   categories = ["head", "person"]
 
-  # FPS Counter Initiate
-  n = 0
-  start = time.time()
-  end = time.time()
-  fps = 0
+  n_del = 0
+  tot_del = 0
 
   # Start video inferencing
+  haha = input("Start Video ?")
   print("This camera is running...")
   while (cap.isOpened()):
     # Capture frame-by-frame
     ret, frame = cap.read()
+
+    start = time.time()
 
     if ret == True:
       height = frame.shape[0]
@@ -118,10 +119,12 @@ if __name__ == "__main__":
           y1 = int(xyxy[1])
           y2 = int(xyxy[3])
 
-          im_input = frame[y1:y2, x1:x2]
-          cvt_img = im_input[:, :, ::-1]  # to RGB
-          reid_img.append(cvt_img)
-          reid_xyxy.append([x1, y1, x2, y2])
+          currarea = (x2 - x1) * (y2 - y1)
+          if (currarea > 1000):
+            im_input = frame[y1:y2, x1:x2]
+            cvt_img = im_input[:, :, ::-1]  # to RGB
+            reid_img.append(cvt_img)
+            reid_xyxy.append([x1, y1, x2, y2])
 
       # ReID Inference
       reid_feat = torch.tensor([])
@@ -134,17 +137,18 @@ if __name__ == "__main__":
       sent_data = ClientPayload(frame, reid_feat, opt.cameraid, reid_xyxy)
       publisher.send_pyobj(sent_data)
 
-      # FPS Counter Print
-      if (n % 20 == 0):
-        n = 0
-        end = time.time()
-        fps = 20 / (end - start)
-        start = end
-        # print(fps)
-
       # Press Q on keyboard to  exit
-      if cv2.waitKey(int(1000 / 10)) & 0xFF == ord('q'):
+      if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+
+      end = time.time()
+      n_del += 1
+      timeDiff = end - start
+      tot_del += timeDiff
+      # print(tot_del / n_del)
+
+      if (timeDiff < 1.0/(15)):
+        time.sleep(1.0/(15) - timeDiff)
 
     # Break the loop
     else:

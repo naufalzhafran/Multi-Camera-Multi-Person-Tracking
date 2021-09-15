@@ -131,3 +131,6 @@ dmypy.json
 # For my project only
 weight/
 test-vid/
+data/
+log/
+myvid/
